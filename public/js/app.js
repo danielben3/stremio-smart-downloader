@@ -15,77 +15,84 @@ const DEFAULT_TRACKERS = [
 ];
 
 document.addEventListener('DOMContentLoaded', () => {
+  setupSearch();
+
   const retryBtn = document.getElementById('retryBtn');
   if (retryBtn) {
     retryBtn.addEventListener('click', () => {
       document.getElementById('errorState').style.display = 'none';
       document.getElementById('loadingState').style.display = 'flex';
-      initApp();
+      initFromUrl();
     });
   }
-  initApp();
+
+  initFromUrl();
 });
 
-async function initApp() {
+function initFromUrl() {
   const pathParts = window.location.pathname.split('/').filter(Boolean);
   // Expected path: /download/:type/:id
   const type = pathParts[1] || 'movie';
   const rawId = pathParts.slice(2).join('/');
   const id = decodeURIComponent(rawId || '').replace('.json', '');
 
-  if (!id) {
-    showError('מזהה תוכן חסר בכתובת');
-    return;
+  if (id && id !== 'movie' && id !== 'series') {
+    loadMedia(type, id);
+  } else {
+    // If opened without specific ID, show search prompt
+    document.getElementById('loadingState').style.display = 'none';
+    document.getElementById('errorMessage').innerText = 'הקלד את שם הסרט או הסדרה בשורת החיפוש למעלה כדי להתחיל.';
+    document.getElementById('errorState').style.display = 'block';
   }
+}
 
-  // Initial meta placeholder
-  currentData.meta = {
-    id,
-    imdbId: id.split(':')[0],
-    type,
-    title: 'טוען תוכן...'
+async function loadMedia(type, id) {
+  document.getElementById('errorState').style.display = 'none';
+  document.getElementById('mainContent').style.display = 'none';
+  document.getElementById('loadingState').style.display = 'flex';
+  document.getElementById('headerStatus').innerText = 'טוען מקורות...';
+  document.getElementById('headerStatus').className = 'badge';
+
+  currentData = {
+    meta: { id, imdbId: id.split(':')[0], type, title: 'טוען...' },
+    torrents: [],
+    subtitles: []
   };
 
-  // Launch parallel requests:
-  // 1. Cinemeta Meta (fastest for title & poster)
+  // 1. Fetch Cinemeta metadata for title/poster
   fetchCinemeta(type, id);
 
-  // 2. Direct Torrentio from client phone IP (super fast, 200ms)
-  const clientTorrentsPromise = fetchTorrentioClientSide(type, id);
+  // 2. Fetch Torrents from Torrentio (Direct Client + Backend in parallel)
+  const clientTorrentsPromise = fetchTorrentioClient(type, id);
+  const backendPromise = fetchBackend(type, id);
 
-  // 3. Backend details & subtitles
-  const backendPromise = fetchBackendDetails(type, id);
-
-  // Handle torrents as soon as they arrive from client or backend
   clientTorrentsPromise.then(torrents => {
-    if (torrents && torrents.length > 0 && currentData.torrents.length === 0) {
+    if (torrents && torrents.length > 0) {
       currentData.torrents = torrents;
       displayResults();
     }
-  }).catch(err => console.warn('Client torrents error:', err));
+  }).catch(e => console.warn('Client torrent fetch warning:', e));
 
-  // Handle backend details (meta, subtitles, fallback torrents)
-  backendPromise.then(backendData => {
-    if (backendData) {
-      if (backendData.meta && (!currentData.meta.title || currentData.meta.title === 'טוען תוכן...')) {
-        currentData.meta = backendData.meta;
+  backendPromise.then(bData => {
+    if (bData) {
+      if (bData.meta && (!currentData.meta.title || currentData.meta.title === 'טוען...')) {
+        currentData.meta = bData.meta;
       }
-      if (backendData.subtitles && backendData.subtitles.length > 0) {
-        currentData.subtitles = backendData.subtitles;
+      if (bData.subtitles && bData.subtitles.length > 0) {
+        currentData.subtitles = bData.subtitles;
       }
-      if ((!currentData.torrents || currentData.torrents.length === 0) && backendData.torrents && backendData.torrents.length > 0) {
-        currentData.torrents = backendData.torrents;
+      if ((!currentData.torrents || currentData.torrents.length === 0) && bData.torrents && bData.torrents.length > 0) {
+        currentData.torrents = bData.torrents;
       }
       displayResults();
     }
-  }).catch(err => console.warn('Backend details error:', err));
+  }).catch(e => console.warn('Backend warning:', e));
 
-  // Final check after 5 seconds if still nothing rendered
   setTimeout(() => {
     if (!currentData.torrents || currentData.torrents.length === 0) {
-      showError('לא נמצאו מקורות טורנט פעילים עבור תוכן זה מ-Torrentio.');
+      showError('לא נמצאו מקורות טורנט זמינים עבור תוכן זה מ-Torrentio. נסה לחפש שוב בשורת החיפוש.');
     }
-  }, 5000);
+  }, 7000);
 }
 
 async function fetchCinemeta(type, id) {
@@ -98,7 +105,7 @@ async function fetchCinemeta(type, id) {
         currentData.meta.title = data.meta.name || currentData.meta.title;
         currentData.meta.year = data.meta.year || data.meta.releaseInfo;
         currentData.meta.poster = data.meta.poster;
-        if (currentData.meta.type === 'series') {
+        if (type === 'series') {
           const parts = id.split(':');
           currentData.meta.season = parts[1] ? parseInt(parts[1], 10) : undefined;
           currentData.meta.episode = parts[2] ? parseInt(parts[2], 10) : undefined;
@@ -107,23 +114,21 @@ async function fetchCinemeta(type, id) {
       }
     }
   } catch (e) {
-    console.warn('Cinemeta fetch error:', e);
+    console.warn('Cinemeta err:', e);
   }
 }
 
-async function fetchBackendDetails(type, id) {
+async function fetchBackend(type, id) {
   try {
     const res = await fetch(`/api/details/${type}/${encodeURIComponent(id)}`);
-    if (res.ok) {
-      return await res.json();
-    }
+    if (res.ok) return await res.json();
   } catch (e) {
-    console.warn('Backend fetch error:', e);
+    console.warn('Backend fetch err:', e);
   }
   return null;
 }
 
-async function fetchTorrentioClientSide(type, id) {
+async function fetchTorrentioClient(type, id) {
   const cleanId = id.replace('.json', '');
   const candidateUrls = [
     `https://torrentio.strem.fun/stream/${type}/${cleanId}.json`,
@@ -133,7 +138,8 @@ async function fetchTorrentioClientSide(type, id) {
 
   for (const url of candidateUrls) {
     try {
-      const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      // Simple fetch without custom headers to avoid CORS preflight OPTIONS failure
+      const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         if (data.streams && Array.isArray(data.streams) && data.streams.length > 0) {
@@ -141,7 +147,7 @@ async function fetchTorrentioClientSide(type, id) {
         }
       }
     } catch (e) {
-      console.warn('Client Torrentio url failed:', url, e);
+      console.warn('Torrentio fetch failed:', url, e);
     }
   }
   return [];
@@ -265,7 +271,7 @@ function displayResults() {
 }
 
 function showError(msg) {
-  if (currentData.torrents && currentData.torrents.length > 0) return; // Don't show error if we already have torrents
+  if (currentData.torrents && currentData.torrents.length > 0) return;
   document.getElementById('loadingState').style.display = 'none';
   document.getElementById('mainContent').style.display = 'none';
   document.getElementById('errorMessage').innerText = msg;
@@ -343,10 +349,8 @@ function selectTorrent(index) {
 }
 
 async function rescoreSubtitles(torrentName) {
-  const pathParts = window.location.pathname.split('/').filter(Boolean);
-  const type = pathParts[1];
-  const rawId = pathParts.slice(2).join('/');
-  const id = decodeURIComponent(rawId || '').replace('.json', '');
+  const type = currentData.meta.type || 'movie';
+  const id = currentData.meta.id || '';
 
   try {
     const res = await fetch(`/api/subtitles/${type}/${encodeURIComponent(id)}?torrentName=${encodeURIComponent(torrentName)}`);
@@ -427,10 +431,8 @@ function setupActions() {
     const torrent = currentData.torrents[selectedTorrentIndex];
     if (!torrent) return;
 
-    // 1. Download Subtitle with matching filename
     downloadSelectedSubtitle(torrent.filename);
 
-    // 2. Open Magnet in 1DM / external app
     setTimeout(() => {
       triggerMagnetDownload(torrent.magnetUrl);
     }, 400);
@@ -465,12 +467,11 @@ function downloadSelectedSubtitle(targetVideoFilename) {
   }
 
   const sub = currentData.subtitles[selectedSubtitleIndex];
-  let cleanName = targetVideoFilename.replace(/\.[^/.]+$/, ''); // remove extension
+  let cleanName = targetVideoFilename.replace(/\.[^/.]+$/, '');
   cleanName = cleanName.replace(/[<>:"/\\|?*]/g, '_');
 
   const downloadUrl = `/api/download-sub?url=${encodeURIComponent(sub.downloadUrl)}&filename=${encodeURIComponent(cleanName)}`;
 
-  // Trigger browser download
   const link = document.createElement('a');
   link.href = downloadUrl;
   link.setAttribute('download', `${cleanName}.srt`);
@@ -485,6 +486,90 @@ function triggerMagnetDownload(magnetUrl) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+function setupSearch() {
+  const searchForm = document.getElementById('searchForm');
+  const searchInput = document.getElementById('searchInput');
+  const dropdown = document.getElementById('searchResultsDropdown');
+
+  searchForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const query = searchInput.value.trim();
+    if (!query) return;
+
+    dropdown.style.display = 'none';
+    searchMedia(query);
+  });
+
+  searchInput.addEventListener('input', debounce(async () => {
+    const query = searchInput.value.trim();
+    if (query.length < 2) {
+      dropdown.style.display = 'none';
+      return;
+    }
+
+    try {
+      const res = await fetch(`https://v3-cinemeta.strem.io/catalog/movie/top/search=${encodeURIComponent(query)}.json`);
+      if (res.ok) {
+        const data = await res.json();
+        const metas = data.metas || [];
+        if (metas.length > 0) {
+          dropdown.innerHTML = metas.slice(0, 5).map(m => `
+            <div class="search-item" onclick="selectSearchMedia('${m.type || 'movie'}', '${m.id}')">
+              <img src="${m.poster || ''}" class="search-item-img" alt="">
+              <div>
+                <div style="font-weight: 600; color: #fff; font-size: 0.9rem;">${escapeHtml(m.name)}</div>
+                <div style="font-size: 0.78rem; color: var(--text-secondary);">${m.year || m.releaseInfo || ''} • ${m.type === 'series' ? 'סדרה' : 'סרט'}</div>
+              </div>
+            </div>
+          `).join('');
+          dropdown.style.display = 'block';
+        } else {
+          dropdown.style.display = 'none';
+        }
+      }
+    } catch (e) {
+      console.warn('Search autocomplete error:', e);
+    }
+  }, 300));
+}
+
+window.selectSearchMedia = function(type, id) {
+  document.getElementById('searchResultsDropdown').style.display = 'none';
+  window.history.pushState(null, '', `/download/${type}/${id}`);
+  loadMedia(type, id);
+};
+
+async function searchMedia(query) {
+  try {
+    const res = await fetch(`https://v3-cinemeta.strem.io/catalog/movie/top/search=${encodeURIComponent(query)}.json`);
+    if (res.ok) {
+      const data = await res.json();
+      const metas = data.metas || [];
+      if (metas.length > 0) {
+        const first = metas[0];
+        window.history.pushState(null, '', `/download/${first.type || 'movie'}/${first.id}`);
+        loadMedia(first.type || 'movie', first.id);
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('Search submit err:', e);
+  }
+  showError(`לא נמצאו תוצאות עבור החיפוש "${query}".`);
+}
+
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
 }
 
 function showToast(msg) {
