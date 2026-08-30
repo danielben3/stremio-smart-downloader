@@ -1,5 +1,8 @@
 # Stremio Smart Downloader (כתוביות בעברית + מובייל) 📥🎬
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/danielben3/stremio-smart-downloader)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/danielben3/stremio-smart-downloader)
+
 תוסף Stremio מתקדם ומותאם למובייל אנדרואיד המאפשר הורדת סרטים וסדרות מ-**Torrentio** במהירות שיא ישירות לאפליקציית **1DM** / מנהל הורדות עצמאי, יחד עם כתוביות בעברית מסונכרנות מ-**Wizdom** ו-**OpenSubtitles** בקידוד **UTF-8** תקין.
 
 ---
