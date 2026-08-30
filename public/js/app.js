@@ -448,6 +448,19 @@ function setupActions() {
     showToast('📥 הורדת קובץ הכתוביות (.SRT) החלה');
   };
 
+  // Download .torrent File directly
+  const torrentFileBtn = document.getElementById('downloadTorrentFileBtn');
+  if (torrentFileBtn) {
+    torrentFileBtn.onclick = () => {
+      const torrent = currentData.torrents[selectedTorrentIndex];
+      if (!torrent) return;
+
+      const directUrl = `https://itorrents.org/torrent/${torrent.infoHash.toUpperCase()}.torrent`;
+      window.open(directUrl, '_blank');
+      showToast('📄 מוריד קובץ .torrent ישיר ל-1DM...');
+    };
+  }
+
   // Copy Magnet Link
   document.getElementById('copyMagnetBtn').onclick = () => {
     const torrent = currentData.torrents[selectedTorrentIndex];
