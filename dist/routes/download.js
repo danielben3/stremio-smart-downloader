@@ -14,7 +14,7 @@ downloadRouter.get('/api/details/:type/:id', async (req, res) => {
         return res.status(400).json({ error: 'Invalid content type' });
     }
     try {
-        const cleanId = id.replace('.json', '');
+        const cleanId = decodeURIComponent(id).replace('.json', '');
         // Fetch metadata and torrents in parallel
         const [meta, torrents] = await Promise.all([
             MetadataService.getMeta(type, cleanId),
@@ -41,7 +41,7 @@ downloadRouter.get('/api/subtitles/:type/:id', async (req, res) => {
     const id = String(req.params.id);
     const torrentName = req.query.torrentName;
     try {
-        const cleanId = id.replace('.json', '');
+        const cleanId = decodeURIComponent(id).replace('.json', '');
         const subtitles = await SubtitleService.getSubtitles(type, cleanId, torrentName);
         res.json({ subtitles });
     }

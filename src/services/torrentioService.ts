@@ -17,49 +17,67 @@ export class TorrentioService {
   private static cache = new Map<string, { data: TorrentStream[]; timestamp: number }>();
   private static CACHE_TTL = 1000 * 60 * 10; // 10 minutes
 
-  static async getStreams(type: ContentType, id: string): Promise<TorrentStream[]> {
-    const cached = this.cache.get(id);
+  static async getStreams(type: ContentType, rawId: string): Promise<TorrentStream[]> {
+    const cleanId = decodeURIComponent(rawId).replace('.json', '');
+    const cached = this.cache.get(cleanId);
     if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
       return cached.data;
     }
 
-    try {
-      const url = `https://torrentio.strem.fun/stream/${type}/${id}.json`;
-      const response = await axios.get(url, {
-        timeout: 8000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    const candidateUrls = [
+      `https://torrentio.strem.fun/stream/${type}/${cleanId}.json`,
+      `https://torrentio.strem.fun/sort=qualitysize/stream/${type}/${cleanId}.json`,
+      `https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl/stream/${type}/${cleanId}.json`
+    ];
+
+    let rawStreams: any[] = [];
+
+    for (const url of candidateUrls) {
+      try {
+        const response = await axios.get(url, {
+          timeout: 10000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9,he;q=0.8'
+          }
+        });
+
+        if (response.data?.streams && Array.isArray(response.data.streams) && response.data.streams.length > 0) {
+          rawStreams = response.data.streams;
+          break; // Found valid streams
         }
-      });
-
-      const rawStreams = response.data?.streams || [];
-      const streams: TorrentStream[] = [];
-
-      for (let i = 0; i < rawStreams.length; i++) {
-        const s = rawStreams[i];
-        if (!s.infoHash) continue;
-
-        const parsed = this.parseStream(s, i);
-        if (parsed) {
-          streams.push(parsed);
-        }
+      } catch (err) {
+        console.warn(`[TorrentioService] Attempt failed for ${url}:`, (err as any)?.message);
       }
-
-      // Sort by Quality (4K -> 1080p -> 720p) and then by Seeds
-      streams.sort((a, b) => {
-        const qualityRank: Record<string, number> = { '4K': 4, '2160p': 4, '1080p': 3, '720p': 2, '480p': 1 };
-        const qA = qualityRank[a.quality] || 0;
-        const qB = qualityRank[b.quality] || 0;
-        if (qB !== qA) return qB - qA;
-        return b.seeders - a.seeders;
-      });
-
-      this.cache.set(id, { data: streams, timestamp: Date.now() });
-      return streams;
-    } catch (error) {
-      console.error(`[TorrentioService] Error fetching streams for ${id}:`, (error as any)?.message);
-      return [];
     }
+
+    const streams: TorrentStream[] = [];
+
+    for (let i = 0; i < rawStreams.length; i++) {
+      const s = rawStreams[i];
+      if (!s.infoHash) continue;
+
+      const parsed = this.parseStream(s, i);
+      if (parsed) {
+        streams.push(parsed);
+      }
+    }
+
+    // Sort by Quality (4K -> 1080p -> 720p) and then by Seeds
+    streams.sort((a, b) => {
+      const qualityRank: Record<string, number> = { '4K': 4, '2160p': 4, '1080p': 3, '720p': 2, '480p': 1 };
+      const qA = qualityRank[a.quality] || 0;
+      const qB = qualityRank[b.quality] || 0;
+      if (qB !== qA) return qB - qA;
+      return b.seeders - a.seeders;
+    });
+
+    if (streams.length > 0) {
+      this.cache.set(cleanId, { data: streams, timestamp: Date.now() });
+    }
+
+    return streams;
   }
 
   private static parseStream(stream: any, index: number): TorrentStream | null {

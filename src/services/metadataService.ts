@@ -11,7 +11,8 @@ export class MetadataService {
       return cached.data;
     }
 
-    const parts = id.split(':');
+    const cleanId = decodeURIComponent(id).replace('.json', '');
+    const parts = cleanId.split(':');
     const imdbId = parts[0];
     const season = parts[1] ? parseInt(parts[1], 10) : undefined;
     const episode = parts[2] ? parseInt(parts[2], 10) : undefined;

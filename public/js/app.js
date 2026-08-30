@@ -3,6 +3,14 @@ let selectedTorrentIndex = 0;
 let selectedSubtitleIndex = 0; // 0 is top Hebrew sub, -1 means none
 
 document.addEventListener('DOMContentLoaded', () => {
+  const retryBtn = document.getElementById('retryBtn');
+  if (retryBtn) {
+    retryBtn.addEventListener('click', () => {
+      document.getElementById('errorState').style.display = 'none';
+      document.getElementById('loadingState').style.display = 'flex';
+      initApp();
+    });
+  }
   initApp();
 });
 
@@ -10,20 +18,21 @@ async function initApp() {
   const pathParts = window.location.pathname.split('/').filter(Boolean);
   // Expected path: /download/:type/:id
   const type = pathParts[1] || 'movie';
-  const id = pathParts[2] || '';
+  const rawId = pathParts.slice(2).join('/');
+  const id = decodeURIComponent(rawId || '').replace('.json', '');
 
   if (!id) {
-    showError('מזהה תוכן חסר');
+    showError('מזהה תוכן חסר בכתובת');
     return;
   }
 
   try {
-    const res = await fetch(`/api/details/${type}/${id}`);
-    if (!res.ok) throw new Error('שגיאה בטעינת נתונים');
+    const res = await fetch(`/api/details/${type}/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
     const data = await res.json();
 
     if (!data.torrents || data.torrents.length === 0) {
-      showError('לא נמצאו טורנטים זמינים מ-Torrentio עבור תוכן זה.');
+      showError('לא נמצאו מקורות טורנט זמינים עבור תוכן זה. ייתכן שהסרט חדש או שעדיין אין לו שחרורים פעילים.');
       return;
     }
 
@@ -40,7 +49,7 @@ async function initApp() {
     setupActions();
   } catch (err) {
     console.error(err);
-    showError('אירעה שגיאה בעת טעינת המידע. אנא נסה שוב.');
+    showError('השרת התעורר משינה (Cold Start) או שהחיבור התעכב. אנא לחץ על "נסה שוב" כדי לטעון מחדש.');
   }
 }
 
@@ -50,6 +59,7 @@ function showError(msg) {
   document.getElementById('errorMessage').innerText = msg;
   document.getElementById('errorState').style.display = 'block';
   document.getElementById('headerStatus').innerText = 'שגיאה';
+  document.getElementById('headerStatus').className = 'badge';
 }
 
 function renderMedia(meta) {
@@ -123,10 +133,11 @@ function selectTorrent(index) {
 async function rescoreSubtitles(torrentName) {
   const pathParts = window.location.pathname.split('/').filter(Boolean);
   const type = pathParts[1];
-  const id = pathParts[2];
+  const rawId = pathParts.slice(2).join('/');
+  const id = decodeURIComponent(rawId || '').replace('.json', '');
 
   try {
-    const res = await fetch(`/api/subtitles/${type}/${id}?torrentName=${encodeURIComponent(torrentName)}`);
+    const res = await fetch(`/api/subtitles/${type}/${encodeURIComponent(id)}?torrentName=${encodeURIComponent(torrentName)}`);
     if (res.ok) {
       const data = await res.json();
       currentData.subtitles = data.subtitles;

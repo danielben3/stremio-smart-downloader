@@ -19,7 +19,7 @@ downloadRouter.get('/api/details/:type/:id', async (req: Request, res: Response)
   }
 
   try {
-    const cleanId = id.replace('.json', '');
+    const cleanId = decodeURIComponent(id).replace('.json', '');
 
     // Fetch metadata and torrents in parallel
     const [meta, torrents] = await Promise.all([
@@ -51,7 +51,7 @@ downloadRouter.get('/api/subtitles/:type/:id', async (req: Request, res: Respons
   const torrentName = req.query.torrentName as string | undefined;
 
   try {
-    const cleanId = id.replace('.json', '');
+    const cleanId = decodeURIComponent(id).replace('.json', '');
     const subtitles = await SubtitleService.getSubtitles(type as ContentType, cleanId, torrentName);
     res.json({ subtitles });
   } catch (error) {
