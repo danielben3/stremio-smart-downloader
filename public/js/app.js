@@ -2,6 +2,18 @@ let currentData = null;
 let selectedTorrentIndex = 0;
 let selectedSubtitleIndex = 0; // 0 is top Hebrew sub, -1 means none
 
+const DEFAULT_TRACKERS = [
+  'udp://tracker.opentrackr.org:1337/announce',
+  'udp://open.demonii.com:1337/announce',
+  'udp://open.stealth.si:80/announce',
+  'udp://tracker.torrent.eu.org:451/announce',
+  'udp://explodie.org:6969/announce',
+  'udp://tracker.openbittorrent.com:6969/announce',
+  'udp://p4p.arenabg.com:1337/announce',
+  'udp://tracker.coppersurfer.tk:6969/announce',
+  'http://tracker.openbittorrent.com:80/announce'
+];
+
 document.addEventListener('DOMContentLoaded', () => {
   const retryBtn = document.getElementById('retryBtn');
   if (retryBtn) {
@@ -27,19 +39,59 @@ async function initApp() {
   }
 
   try {
-    const res = await fetch(`/api/details/${type}/${encodeURIComponent(id)}`);
-    if (!res.ok) throw new Error(`Server returned ${res.status}`);
-    const data = await res.json();
+    // 1. Fetch metadata and subtitles from our backend
+    let meta = { id, imdbId: id.split(':')[0], type, title: id };
+    let subtitles = [];
+    let torrents = [];
 
-    if (!data.torrents || data.torrents.length === 0) {
-      showError('לא נמצאו מקורות טורנט זמינים עבור תוכן זה. ייתכן שהסרט חדש או שעדיין אין לו שחרורים פעילים.');
+    try {
+      const res = await fetch(`/api/details/${type}/${encodeURIComponent(id)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.meta) meta = data.meta;
+        if (data.subtitles) subtitles = data.subtitles;
+        if (data.torrents && data.torrents.length > 0) torrents = data.torrents;
+      }
+    } catch (backendErr) {
+      console.warn('Backend fetch warning:', backendErr);
+    }
+
+    // 2. If backend torrents is empty (e.g. cloud datacenter IP blocked by Cloudflare), fetch directly from client browser!
+    if (torrents.length === 0) {
+      console.log('Fetching torrents directly from client mobile IP...');
+      const clientTorrents = await fetchTorrentioClientSide(type, id);
+      if (clientTorrents && clientTorrents.length > 0) {
+        torrents = clientTorrents;
+      }
+    }
+
+    // 3. Fallback for metadata if missing
+    if (!meta.title || meta.title === id) {
+      try {
+        const cleanImdb = id.split(':')[0];
+        const cinemetaRes = await fetch(`https://v3-cinemeta.strem.io/meta/${type}/${cleanImdb}.json`);
+        if (cinemetaRes.ok) {
+          const cData = await cinemetaRes.json();
+          if (cData.meta) {
+            meta.title = cData.meta.name || meta.title;
+            meta.year = cData.meta.year || cData.meta.releaseInfo;
+            meta.poster = cData.meta.poster;
+          }
+        }
+      } catch (cErr) {
+        console.warn('Cinemeta client fetch failed:', cErr);
+      }
+    }
+
+    if (torrents.length === 0) {
+      showError('לא נמצאו מקורות טורנט זמינים עבור תוכן זה מ-Torrentio.');
       return;
     }
 
-    currentData = data;
-    renderMedia(data.meta);
-    renderTorrents(data.torrents);
-    renderSubtitles(data.subtitles);
+    currentData = { meta, torrents, subtitles };
+    renderMedia(meta);
+    renderTorrents(torrents);
+    renderSubtitles(subtitles);
 
     document.getElementById('loadingState').style.display = 'none';
     document.getElementById('mainContent').style.display = 'block';
@@ -49,8 +101,134 @@ async function initApp() {
     setupActions();
   } catch (err) {
     console.error(err);
-    showError('השרת התעורר משינה (Cold Start) או שהחיבור התעכב. אנא לחץ על "נסה שוב" כדי לטעון מחדש.');
+    showError('אירעה שגיאה בטעינת הנתונים. אנא לחץ "נסה שוב".');
   }
+}
+
+async function fetchTorrentioClientSide(type, id) {
+  const cleanId = id.replace('.json', '');
+  const candidateUrls = [
+    `https://torrentio.strem.fun/stream/${type}/${cleanId}.json`,
+    `https://torrentio.strem.fun/sort=qualitysize/stream/${type}/${cleanId}.json`,
+    `https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl/stream/${type}/${cleanId}.json`
+  ];
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.streams && Array.isArray(data.streams) && data.streams.length > 0) {
+          return parseRawStreams(data.streams);
+        }
+      }
+    } catch (e) {
+      console.warn('Client-side Torrentio attempt failed for', url, e);
+    }
+  }
+
+  return [];
+}
+
+function parseRawStreams(rawStreams) {
+  const streams = [];
+
+  rawStreams.forEach((stream, index) => {
+    if (!stream.infoHash) return;
+
+    const rawTitle = stream.title || '';
+    const rawName = stream.name || '';
+    const lines = rawTitle.split('\n');
+
+    const filename = lines[0]?.trim() || `Media_${stream.infoHash}`;
+    const detailsLine = lines[1] || '';
+
+    // Parse Quality
+    let quality = '1080p';
+    let resolution = '1080p';
+    if (/4k|2160p/i.test(rawName) || /4k|2160p/i.test(filename)) {
+      quality = '4K';
+      resolution = '2160p';
+    } else if (/1080p/i.test(rawName) || /1080p/i.test(filename)) {
+      quality = '1080p';
+      resolution = '1080p';
+    } else if (/720p/i.test(rawName) || /720p/i.test(filename)) {
+      quality = '720p';
+      resolution = '720p';
+    } else if (/480p|576p|SD/i.test(rawName) || /480p|576p|SD/i.test(filename)) {
+      quality = '480p';
+      resolution = '480p';
+    }
+
+    // Parse Codec
+    let codec = 'x264';
+    if (/hevc|x265|h\.265/i.test(rawTitle) || /hevc|x265|h\.265/i.test(filename)) {
+      codec = 'x265 (HEVC)';
+    } else if (/av1/i.test(rawTitle) || /av1/i.test(filename)) {
+      codec = 'AV1';
+    }
+
+    // Parse Seeders
+    let seeders = 0;
+    const seedMatch = detailsLine.match(/(?:👤|👥|Seeds?:?)\s*(\d+)/i) || rawTitle.match(/👤\s*(\d+)/);
+    if (seedMatch) seeders = parseInt(seedMatch[1], 10);
+
+    // Parse Size
+    let sizeFormatted = 'לא ידוע';
+    let sizeBytes = 0;
+    const sizeMatch = detailsLine.match(/(?:💾|Size:?)\s*([\d.]+\s*(?:GB|MB|KB|G|M))/i) || rawTitle.match(/💾\s*([\d.]+\s*(?:GB|MB))/);
+    if (sizeMatch) {
+      sizeFormatted = sizeMatch[1].trim();
+      const num = parseFloat(sizeMatch[1]);
+      if (sizeMatch[1].toUpperCase().includes('GB')) sizeBytes = num * 1024 * 1024 * 1024;
+      else if (sizeMatch[1].toUpperCase().includes('MB')) sizeBytes = num * 1024 * 1024;
+    }
+
+    // Provider
+    let provider = 'Torrentio';
+    const provMatch = detailsLine.match(/(?:⚙️|Provider:?)\s*([A-Za-z0-9_-]+)/);
+    if (provMatch) provider = provMatch[1].trim();
+
+    // Magnet link
+    const trackers = stream.sources && Array.isArray(stream.sources) && stream.sources.length > 0
+      ? stream.sources.filter(s => s.startsWith('tracker:'))
+      : DEFAULT_TRACKERS;
+
+    const trackerParams = trackers
+      .map(t => `&tr=${encodeURIComponent(t.replace(/^tracker:/, ''))}`)
+      .join('');
+
+    const magnetUrl = `magnet:?xt=urn:btih:${stream.infoHash}&dn=${encodeURIComponent(filename)}${trackerParams}`;
+
+    streams.push({
+      id: `torrent-${stream.infoHash}-${stream.fileIdx ?? 0}-${index}`,
+      title: filename,
+      name: rawName,
+      quality,
+      resolution,
+      codec,
+      sizeBytes,
+      sizeFormatted,
+      seeders,
+      infoHash: stream.infoHash,
+      fileIdx: stream.fileIdx,
+      magnetUrl,
+      filename,
+      provider,
+      rawTitle
+    });
+  });
+
+  // Sort by Quality and Seeds
+  streams.sort((a, b) => {
+    const qualityRank = { '4K': 4, '2160p': 4, '1080p': 3, '720p': 2, '480p': 1 };
+    const qA = qualityRank[a.quality] || 0;
+    const qB = qualityRank[b.quality] || 0;
+    if (qB !== qA) return qB - qA;
+    return b.seeders - a.seeders;
+  });
+
+  return streams;
 }
 
 function showError(msg) {
@@ -123,7 +301,6 @@ function selectTorrent(index) {
     c.classList.toggle('selected', idx === index);
   });
 
-  // Re-score subtitles based on this torrent's filename
   const selectedTorrent = currentData.torrents[index];
   if (selectedTorrent) {
     rescoreSubtitles(selectedTorrent.filename);
@@ -242,7 +419,6 @@ function setupActions() {
     navigator.clipboard.writeText(torrent.magnetUrl).then(() => {
       showToast('🧲 קישור ה-Magnet הועתק ללוח!');
     }).catch(() => {
-      // Fallback
       prompt('העתק את קישור ה-Magnet:', torrent.magnetUrl);
     });
   });
