@@ -9,6 +9,9 @@
     "build": "tsc",
     "start": "node dist/index.js"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "keywords": [
     "stremio",
     "addon",
@@ -21,20 +24,19 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.4",
+    "@types/qrcode": "^1.5.5",
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "iconv-lite": "^0.6.3",
-    "qrcode": "^1.5.4"
-  },
-  "devDependencies": {
-    "@types/cors": "^2.8.17",
-    "@types/express": "^5.0.0",
-    "@types/node": "^22.13.4",
-    "@types/qrcode": "^1.5.5",
+    "qrcode": "^1.5.4",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3"
-  }
+  },
+  "devDependencies": {}
 }

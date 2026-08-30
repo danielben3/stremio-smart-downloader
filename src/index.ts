@@ -37,11 +37,11 @@ app.get('/', (_req, res) => {
   res.sendFile(path.join(rootDir, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
+app.listen(Number(PORT), '0.0.0.0', () => {
   console.log(`=====================================================`);
   console.log(`🚀 Stremio Smart Downloader is running!`);
-  console.log(`🌐 Web & Install Page: http://localhost:${PORT}`);
-  console.log(`📦 Manifest URL:       http://localhost:${PORT}/manifest.json`);
-  console.log(`📥 Test Downloader:    http://localhost:${PORT}/download/movie/tt15239678`);
+  console.log(`🌐 Web & Install Page: http://0.0.0.0:${PORT}`);
+  console.log(`📦 Manifest URL:       http://0.0.0.0:${PORT}/manifest.json`);
+  console.log(`📥 Test Downloader:    http://0.0.0.0:${PORT}/download/movie/tt15239678`);
   console.log(`=====================================================`);
 });
