@@ -29,8 +29,11 @@ stremioRouter.get('/stream/:type/:id.json', async (req: Request, res: Response) 
     const meta = await MetadataService.getMeta(type as ContentType, cleanId);
 
     // Determine public base URL from request or environment
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    let protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const host = req.headers['x-forwarded-host'] || req.get('host');
+    if (host && (host.includes('onrender.com') || host.includes('vercel.app') || host.includes('render.com'))) {
+      protocol = 'https';
+    }
     const baseUrl = process.env.BASE_URL || `${protocol}://${host}`;
 
     const downloadUrl = `${baseUrl}/download/${type}/${cleanId}`;

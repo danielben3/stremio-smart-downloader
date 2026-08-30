@@ -1,6 +1,6 @@
-let currentData = null;
+let currentData = { meta: {}, torrents: [], subtitles: [] };
 let selectedTorrentIndex = 0;
-let selectedSubtitleIndex = 0; // 0 is top Hebrew sub, -1 means none
+let selectedSubtitleIndex = 0;
 
 const DEFAULT_TRACKERS = [
   'udp://tracker.opentrackr.org:1337/announce',
@@ -38,71 +38,89 @@ async function initApp() {
     return;
   }
 
+  // Initial meta placeholder
+  currentData.meta = {
+    id,
+    imdbId: id.split(':')[0],
+    type,
+    title: 'טוען תוכן...'
+  };
+
+  // Launch parallel requests:
+  // 1. Cinemeta Meta (fastest for title & poster)
+  fetchCinemeta(type, id);
+
+  // 2. Direct Torrentio from client phone IP (super fast, 200ms)
+  const clientTorrentsPromise = fetchTorrentioClientSide(type, id);
+
+  // 3. Backend details & subtitles
+  const backendPromise = fetchBackendDetails(type, id);
+
+  // Handle torrents as soon as they arrive from client or backend
+  clientTorrentsPromise.then(torrents => {
+    if (torrents && torrents.length > 0 && currentData.torrents.length === 0) {
+      currentData.torrents = torrents;
+      displayResults();
+    }
+  }).catch(err => console.warn('Client torrents error:', err));
+
+  // Handle backend details (meta, subtitles, fallback torrents)
+  backendPromise.then(backendData => {
+    if (backendData) {
+      if (backendData.meta && (!currentData.meta.title || currentData.meta.title === 'טוען תוכן...')) {
+        currentData.meta = backendData.meta;
+      }
+      if (backendData.subtitles && backendData.subtitles.length > 0) {
+        currentData.subtitles = backendData.subtitles;
+      }
+      if ((!currentData.torrents || currentData.torrents.length === 0) && backendData.torrents && backendData.torrents.length > 0) {
+        currentData.torrents = backendData.torrents;
+      }
+      displayResults();
+    }
+  }).catch(err => console.warn('Backend details error:', err));
+
+  // Final check after 5 seconds if still nothing rendered
+  setTimeout(() => {
+    if (!currentData.torrents || currentData.torrents.length === 0) {
+      showError('לא נמצאו מקורות טורנט פעילים עבור תוכן זה מ-Torrentio.');
+    }
+  }, 5000);
+}
+
+async function fetchCinemeta(type, id) {
   try {
-    // 1. Fetch metadata and subtitles from our backend
-    let meta = { id, imdbId: id.split(':')[0], type, title: id };
-    let subtitles = [];
-    let torrents = [];
-
-    try {
-      const res = await fetch(`/api/details/${type}/${encodeURIComponent(id)}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.meta) meta = data.meta;
-        if (data.subtitles) subtitles = data.subtitles;
-        if (data.torrents && data.torrents.length > 0) torrents = data.torrents;
-      }
-    } catch (backendErr) {
-      console.warn('Backend fetch warning:', backendErr);
-    }
-
-    // 2. If backend torrents is empty (e.g. cloud datacenter IP blocked by Cloudflare), fetch directly from client browser!
-    if (torrents.length === 0) {
-      console.log('Fetching torrents directly from client mobile IP...');
-      const clientTorrents = await fetchTorrentioClientSide(type, id);
-      if (clientTorrents && clientTorrents.length > 0) {
-        torrents = clientTorrents;
-      }
-    }
-
-    // 3. Fallback for metadata if missing
-    if (!meta.title || meta.title === id) {
-      try {
-        const cleanImdb = id.split(':')[0];
-        const cinemetaRes = await fetch(`https://v3-cinemeta.strem.io/meta/${type}/${cleanImdb}.json`);
-        if (cinemetaRes.ok) {
-          const cData = await cinemetaRes.json();
-          if (cData.meta) {
-            meta.title = cData.meta.name || meta.title;
-            meta.year = cData.meta.year || cData.meta.releaseInfo;
-            meta.poster = cData.meta.poster;
-          }
+    const cleanImdb = id.split(':')[0];
+    const res = await fetch(`https://v3-cinemeta.strem.io/meta/${type}/${cleanImdb}.json`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.meta) {
+        currentData.meta.title = data.meta.name || currentData.meta.title;
+        currentData.meta.year = data.meta.year || data.meta.releaseInfo;
+        currentData.meta.poster = data.meta.poster;
+        if (currentData.meta.type === 'series') {
+          const parts = id.split(':');
+          currentData.meta.season = parts[1] ? parseInt(parts[1], 10) : undefined;
+          currentData.meta.episode = parts[2] ? parseInt(parts[2], 10) : undefined;
         }
-      } catch (cErr) {
-        console.warn('Cinemeta client fetch failed:', cErr);
+        renderMedia(currentData.meta);
       }
     }
-
-    if (torrents.length === 0) {
-      showError('לא נמצאו מקורות טורנט זמינים עבור תוכן זה מ-Torrentio.');
-      return;
-    }
-
-    currentData = { meta, torrents, subtitles };
-    renderMedia(meta);
-    renderTorrents(torrents);
-    renderSubtitles(subtitles);
-
-    document.getElementById('loadingState').style.display = 'none';
-    document.getElementById('mainContent').style.display = 'block';
-    document.getElementById('headerStatus').innerText = 'מוכן להורדה';
-    document.getElementById('headerStatus').className = 'badge badge-success';
-
-    setupActions();
-  } catch (err) {
-    console.error(err);
-    showError('אירעה שגיאה בטעינת הנתונים. אנא לחץ "נסה שוב".');
+  } catch (e) {
+    console.warn('Cinemeta fetch error:', e);
   }
+}
+
+async function fetchBackendDetails(type, id) {
+  try {
+    const res = await fetch(`/api/details/${type}/${encodeURIComponent(id)}`);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('Backend fetch error:', e);
+  }
+  return null;
 }
 
 async function fetchTorrentioClientSide(type, id) {
@@ -123,10 +141,9 @@ async function fetchTorrentioClientSide(type, id) {
         }
       }
     } catch (e) {
-      console.warn('Client-side Torrentio attempt failed for', url, e);
+      console.warn('Client Torrentio url failed:', url, e);
     }
   }
-
   return [];
 }
 
@@ -143,7 +160,7 @@ function parseRawStreams(rawStreams) {
     const filename = lines[0]?.trim() || `Media_${stream.infoHash}`;
     const detailsLine = lines[1] || '';
 
-    // Parse Quality
+    // Quality
     let quality = '1080p';
     let resolution = '1080p';
     if (/4k|2160p/i.test(rawName) || /4k|2160p/i.test(filename)) {
@@ -160,7 +177,7 @@ function parseRawStreams(rawStreams) {
       resolution = '480p';
     }
 
-    // Parse Codec
+    // Codec
     let codec = 'x264';
     if (/hevc|x265|h\.265/i.test(rawTitle) || /hevc|x265|h\.265/i.test(filename)) {
       codec = 'x265 (HEVC)';
@@ -168,12 +185,12 @@ function parseRawStreams(rawStreams) {
       codec = 'AV1';
     }
 
-    // Parse Seeders
+    // Seeds
     let seeders = 0;
     const seedMatch = detailsLine.match(/(?:👤|👥|Seeds?:?)\s*(\d+)/i) || rawTitle.match(/👤\s*(\d+)/);
     if (seedMatch) seeders = parseInt(seedMatch[1], 10);
 
-    // Parse Size
+    // Size
     let sizeFormatted = 'לא ידוע';
     let sizeBytes = 0;
     const sizeMatch = detailsLine.match(/(?:💾|Size:?)\s*([\d.]+\s*(?:GB|MB|KB|G|M))/i) || rawTitle.match(/💾\s*([\d.]+\s*(?:GB|MB))/);
@@ -231,7 +248,24 @@ function parseRawStreams(rawStreams) {
   return streams;
 }
 
+function displayResults() {
+  if (currentData.torrents.length === 0) return;
+
+  renderMedia(currentData.meta);
+  renderTorrents(currentData.torrents);
+  renderSubtitles(currentData.subtitles);
+
+  document.getElementById('loadingState').style.display = 'none';
+  document.getElementById('errorState').style.display = 'none';
+  document.getElementById('mainContent').style.display = 'block';
+  document.getElementById('headerStatus').innerText = 'מוכן להורדה';
+  document.getElementById('headerStatus').className = 'badge badge-success';
+
+  setupActions();
+}
+
 function showError(msg) {
+  if (currentData.torrents && currentData.torrents.length > 0) return; // Don't show error if we already have torrents
   document.getElementById('loadingState').style.display = 'none';
   document.getElementById('mainContent').style.display = 'none';
   document.getElementById('errorMessage').innerText = msg;
@@ -247,6 +281,7 @@ function renderMedia(meta) {
 
   if (meta.poster) {
     document.getElementById('mediaPoster').src = meta.poster;
+    document.getElementById('mediaPoster').style.display = 'block';
   } else {
     document.getElementById('mediaPoster').style.display = 'none';
   }
@@ -388,7 +423,7 @@ function selectSubtitle(index) {
 
 function setupActions() {
   // Download All (SRT + Magnet to 1DM)
-  document.getElementById('downloadAllBtn').addEventListener('click', () => {
+  document.getElementById('downloadAllBtn').onclick = () => {
     const torrent = currentData.torrents[selectedTorrentIndex];
     if (!torrent) return;
 
@@ -401,18 +436,18 @@ function setupActions() {
     }, 400);
 
     showToast('🚀 הכתובית יורדת, והטורנט נפתח באפליקציית ההורדות!');
-  });
+  };
 
   // Download Subtitle Only
-  document.getElementById('downloadSubOnlyBtn').addEventListener('click', () => {
+  document.getElementById('downloadSubOnlyBtn').onclick = () => {
     const torrent = currentData.torrents[selectedTorrentIndex];
     const targetFilename = torrent ? torrent.filename : (currentData.meta.title || 'subtitle');
     downloadSelectedSubtitle(targetFilename);
     showToast('📥 הורדת קובץ הכתוביות (.SRT) החלה');
-  });
+  };
 
   // Copy Magnet Link
-  document.getElementById('copyMagnetBtn').addEventListener('click', () => {
+  document.getElementById('copyMagnetBtn').onclick = () => {
     const torrent = currentData.torrents[selectedTorrentIndex];
     if (!torrent) return;
 
@@ -421,7 +456,7 @@ function setupActions() {
     }).catch(() => {
       prompt('העתק את קישור ה-Magnet:', torrent.magnetUrl);
     });
-  });
+  };
 }
 
 function downloadSelectedSubtitle(targetVideoFilename) {
@@ -445,7 +480,6 @@ function downloadSelectedSubtitle(targetVideoFilename) {
 }
 
 function triggerMagnetDownload(magnetUrl) {
-  // Standard Android Intent / URI handler for 1DM, LibreTorrent, Flud
   const link = document.createElement('a');
   link.href = magnetUrl;
   document.body.appendChild(link);
