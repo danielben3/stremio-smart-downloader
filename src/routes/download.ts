@@ -6,6 +6,7 @@ import { TorrentioService } from '../services/torrentioService.js';
 import { SubtitleService } from '../services/subtitles/subtitleService.js';
 import { EncodingService } from '../services/encodingService.js';
 import { ContentType, DownloadDetailsResponse } from '../types/index.js';
+import torrentStream from 'torrent-stream';
 
 export const downloadRouter = Router();
 
@@ -103,6 +104,117 @@ downloadRouter.get('/api/download-sub', async (req: Request, res: Response) => {
   } catch (error) {
     console.error(`[DownloadRouter] Failed to proxy subtitle: ${subUrl}`, (error as any)?.message);
     res.status(500).send('Error downloading and processing subtitle');
+  }
+});
+
+// Direct HTTP Torrent Streaming & Download Bridge (Zero P2P blockades for mobile carriers)
+downloadRouter.get('/api/stream/:infoHash', (req: Request, res: Response) => {
+  const infoHash = String(req.params.infoHash);
+  let customFilename = (req.query.filename as string) || `video_${infoHash}.mp4`;
+
+  const DEFAULT_TRACKERS = [
+    'udp://tracker.opentrackr.org:1337/announce',
+    'udp://open.demonii.com:1337/announce',
+    'udp://open.stealth.si:80/announce',
+    'udp://tracker.torrent.eu.org:451/announce',
+    'udp://explodie.org:6969/announce',
+    'udp://tracker.openbittorrent.com:6969/announce',
+    'udp://p4p.arenabg.com:1337/announce',
+    'udp://tracker.coppersurfer.tk:6969/announce',
+    'http://tracker.openbittorrent.com:80/announce'
+  ];
+
+  try {
+    const engine = torrentStream(`magnet:?xt=urn:btih:${infoHash}`, {
+      trackers: DEFAULT_TRACKERS
+    });
+
+    let isClosed = false;
+
+    const cleanup = () => {
+      if (!isClosed) {
+        isClosed = true;
+        try {
+          engine.destroy(() => {});
+        } catch {}
+      }
+    };
+
+    req.on('close', cleanup);
+    res.on('finish', cleanup);
+
+    // Timeout if torrent cannot be resolved in 25 seconds
+    const timeout = setTimeout(() => {
+      if (!res.headersSent) {
+        cleanup();
+        res.status(504).send('Torrent stream resolution timeout');
+      }
+    }, 25000);
+
+    engine.on('ready', () => {
+      clearTimeout(timeout);
+      if (isClosed) return;
+
+      // Find the main video file by size
+      const videoFiles = engine.files.filter((f: any) =>
+        f.name.endsWith('.mp4') || f.name.endsWith('.mkv') || f.name.endsWith('.avi') || f.name.endsWith('.webm')
+      );
+
+      const targetFile = videoFiles.length > 0
+        ? videoFiles.reduce((prev: any, curr: any) => curr.length > prev.length ? curr : prev, videoFiles[0])
+        : engine.files.reduce((prev: any, curr: any) => curr.length > prev.length ? curr : prev, engine.files[0]);
+
+      if (!targetFile) {
+        cleanup();
+        return res.status(404).send('No playable file found in torrent');
+      }
+
+      const total = targetFile.length;
+      const range = req.headers.range;
+      const filename = customFilename || targetFile.name;
+      const mimeType = filename.endsWith('.mkv') ? 'video/x-matroska' : 'video/mp4';
+
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : total - 1;
+        const chunkSize = (end - start) + 1;
+
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${total}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunkSize,
+          'Content-Type': mimeType
+        });
+
+        const fileStream = targetFile.createReadStream({ start, end });
+        fileStream.pipe(res);
+      } else {
+        res.writeHead(200, {
+          'Content-Length': total,
+          'Accept-Ranges': 'bytes',
+          'Content-Type': mimeType
+        });
+
+        const fileStream = targetFile.createReadStream();
+        fileStream.pipe(res);
+      }
+    });
+
+    engine.on('error', (err: any) => {
+      console.error('[TorrentStream Error]:', err);
+      clearTimeout(timeout);
+      cleanup();
+      if (!res.headersSent) {
+        res.status(500).send('Error streaming torrent');
+      }
+    });
+  } catch (error) {
+    console.error('[TorrentStream Exception]:', error);
+    res.status(500).send('Failed to initialize stream bridge');
   }
 });
 

@@ -426,6 +426,30 @@ function selectSubtitle(index) {
 }
 
 function setupActions() {
+  // Direct HTTP Download (Bypasses P2P blocking, instant fast HTTP stream to 1DM)
+  const directHttpBtn = document.getElementById('downloadDirectHttpBtn');
+  if (directHttpBtn) {
+    directHttpBtn.onclick = () => {
+      const torrent = currentData.torrents[selectedTorrentIndex];
+      if (!torrent) return;
+
+      // 1. Download subtitle with matching name
+      downloadSelectedSubtitle(torrent.filename);
+
+      // 2. Open Direct HTTP Stream in 1DM / Browser
+      const directStreamUrl = `/api/stream/${torrent.infoHash}?filename=${encodeURIComponent(torrent.filename)}`;
+      
+      const link = document.createElement('a');
+      link.href = directStreamUrl;
+      link.setAttribute('download', torrent.filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      showToast('⚡ הורדה ישירה החלה ב-HTTP ללא חסימות P2P!');
+    };
+  }
+
   // Download All (SRT + Magnet to 1DM)
   document.getElementById('downloadAllBtn').onclick = () => {
     const torrent = currentData.torrents[selectedTorrentIndex];
