@@ -92,7 +92,7 @@ async function loadMedia(type, id) {
     if (!currentData.torrents || currentData.torrents.length === 0) {
       showError('לא נמצאו מקורות טורנט זמינים עבור תוכן זה מ-Torrentio. נסה לחפש שוב בשורת החיפוש.');
     }
-  }, 7000);
+  }, 25000);
 }
 
 async function fetchCinemeta(type, id) {
@@ -242,9 +242,9 @@ function parseRawStreams(rawStreams) {
     });
   });
 
-  // Sort by Quality and Seeds
+  // Sort for Mobile: 1080p (optimal quality/size), then 720p, then 4K, prioritized by seeders
   streams.sort((a, b) => {
-    const qualityRank = { '4K': 4, '2160p': 4, '1080p': 3, '720p': 2, '480p': 1 };
+    const qualityRank = { '1080p': 4, '720p': 3, '4K': 2, '2160p': 2, '480p': 1 };
     const qA = qualityRank[a.quality] || 0;
     const qB = qualityRank[b.quality] || 0;
     if (qB !== qA) return qB - qA;
@@ -344,7 +344,15 @@ function selectTorrent(index) {
 
   const selectedTorrent = currentData.torrents[index];
   if (selectedTorrent) {
+    updateMagnetHref(selectedTorrent.magnetUrl);
     rescoreSubtitles(selectedTorrent.filename);
+  }
+}
+
+function updateMagnetHref(magnetUrl) {
+  const openMagnetLink = document.getElementById('openMagnetLink');
+  if (openMagnetLink && magnetUrl) {
+    openMagnetLink.href = magnetUrl;
   }
 }
 
@@ -426,76 +434,71 @@ function selectSubtitle(index) {
 }
 
 function setupActions() {
-  // Direct HTTP Download (Bypasses P2P blocking, instant fast HTTP stream to 1DM)
-  const directHttpBtn = document.getElementById('downloadDirectHttpBtn');
-  if (directHttpBtn) {
-    directHttpBtn.onclick = () => {
-      const torrent = currentData.torrents[selectedTorrentIndex];
-      if (!torrent) return;
+  const torrent = currentData.torrents[selectedTorrentIndex];
+  if (torrent) {
+    updateMagnetHref(torrent.magnetUrl);
+  }
 
-      // 1. Download subtitle with matching name
-      downloadSelectedSubtitle(torrent.filename);
-
-      // 2. Open Direct HTTP Stream in 1DM / Browser
-      const directStreamUrl = `/api/stream/${torrent.infoHash}?filename=${encodeURIComponent(torrent.filename)}`;
-      
-      const link = document.createElement('a');
-      link.href = directStreamUrl;
-      link.setAttribute('download', torrent.filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      showToast('⚡ הורדה ישירה החלה ב-HTTP ללא חסימות P2P!');
+  // 1. Download Subtitle Only
+  const downloadSubBtn = document.getElementById('downloadSubOnlyBtn');
+  if (downloadSubBtn) {
+    downloadSubBtn.onclick = () => {
+      const currentTorrent = currentData.torrents[selectedTorrentIndex];
+      const targetFilename = currentTorrent ? currentTorrent.filename : (currentData.meta.title || 'subtitle');
+      downloadSelectedSubtitle(targetFilename);
+      showToast('📥 קובץ הכתוביות (.SRT) יורד למכשיר...');
     };
   }
 
-  // Download All (SRT + Magnet to 1DM)
-  document.getElementById('downloadAllBtn').onclick = () => {
-    const torrent = currentData.torrents[selectedTorrentIndex];
-    if (!torrent) return;
-
-    downloadSelectedSubtitle(torrent.filename);
-
-    setTimeout(() => {
-      triggerMagnetDownload(torrent.magnetUrl);
-    }, 400);
-
-    showToast('🚀 הכתובית יורדת, והטורנט נפתח באפליקציית ההורדות!');
-  };
-
-  // Download Subtitle Only
-  document.getElementById('downloadSubOnlyBtn').onclick = () => {
-    const torrent = currentData.torrents[selectedTorrentIndex];
-    const targetFilename = torrent ? torrent.filename : (currentData.meta.title || 'subtitle');
-    downloadSelectedSubtitle(targetFilename);
-    showToast('📥 הורדת קובץ הכתוביות (.SRT) החלה');
-  };
-
-  // Download .torrent File directly
-  const torrentFileBtn = document.getElementById('downloadTorrentFileBtn');
-  if (torrentFileBtn) {
-    torrentFileBtn.onclick = () => {
-      const torrent = currentData.torrents[selectedTorrentIndex];
-      if (!torrent) return;
-
-      const directUrl = `https://itorrents.org/torrent/${torrent.infoHash.toUpperCase()}.torrent`;
-      window.open(directUrl, '_blank');
-      showToast('📄 מוריד קובץ .torrent ישיר ל-1DM...');
+  // 2. Open Magnet Link in App (1DM / Flud)
+  const openMagnet = document.getElementById('openMagnetLink');
+  if (openMagnet) {
+    openMagnet.onclick = (e) => {
+      const currentTorrent = currentData.torrents[selectedTorrentIndex];
+      if (!currentTorrent || !currentTorrent.magnetUrl) {
+        e.preventDefault();
+        showToast('⚠️ לא נבחר טורנט תקין');
+        return;
+      }
+      openMagnet.href = currentTorrent.magnetUrl;
+      showToast('🚀 פותח את הטורנט באפליקציית ההורדות (1DM / Flud)...');
     };
   }
 
-  // Copy Magnet Link
-  document.getElementById('copyMagnetBtn').onclick = () => {
-    const torrent = currentData.torrents[selectedTorrentIndex];
-    if (!torrent) return;
+  // 3. Copy Magnet Link
+  const copyBtn = document.getElementById('copyMagnetBtn');
+  if (copyBtn) {
+    copyBtn.onclick = () => {
+      const currentTorrent = currentData.torrents[selectedTorrentIndex];
+      if (!currentTorrent) return;
 
-    navigator.clipboard.writeText(torrent.magnetUrl).then(() => {
-      showToast('🧲 קישור ה-Magnet הועתק ללוח!');
-    }).catch(() => {
-      prompt('העתק את קישור ה-Magnet:', torrent.magnetUrl);
-    });
-  };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(currentTorrent.magnetUrl).then(() => {
+          showToast('📋 קישור ה-Magnet הועתק! פתח את 1DM ולחץ + כדי להוריד');
+        }).catch(() => {
+          prompt('העתק את קישור ה-Magnet:', currentTorrent.magnetUrl);
+        });
+      } else {
+        prompt('העתק את קישור ה-Magnet:', currentTorrent.magnetUrl);
+      }
+    };
+  }
+
+  // 4. Download Both
+  const downloadAll = document.getElementById('downloadAllBtn');
+  if (downloadAll) {
+    downloadAll.onclick = () => {
+      const currentTorrent = currentData.torrents[selectedTorrentIndex];
+      if (!currentTorrent) return;
+
+      downloadSelectedSubtitle(currentTorrent.filename);
+      showToast('📥 הכתוביות יורדות, פותח את הטורנט להורדה...');
+
+      setTimeout(() => {
+        window.location.href = currentTorrent.magnetUrl;
+      }, 700);
+    };
+  }
 }
 
 function downloadSelectedSubtitle(targetVideoFilename) {

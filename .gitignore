@@ -1,4 +1,16 @@
 node_modules/
 .env
+.env.*
 *.log
 .DS_Store
+downloads/
+scratch/
+dist/
+cache/
+*.srt
+download_full_movie*.js
+download_with_webtorrent.js
+simulate_download_e2e.js
+test_mobile_simulation.js
+
+

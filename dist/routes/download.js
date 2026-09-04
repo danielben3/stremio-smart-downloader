@@ -51,6 +51,7 @@ downloadRouter.get('/api/subtitles/:type/:id', async (req, res) => {
         res.status(500).json({ error: 'Failed to fetch subtitles' });
     }
 });
+import { TranslationService } from '../services/subtitles/translationService.js';
 // Proxy and download subtitle with auto UTF-8 conversion and exact filename match
 downloadRouter.get('/api/download-sub', async (req, res) => {
     const subUrl = req.query.url;
@@ -65,6 +66,38 @@ downloadRouter.get('/api/download-sub', async (req, res) => {
     }
     if (!targetFilename.endsWith('.srt')) {
         targetFilename += '.srt';
+    }
+    // Handle AI Translated subtitles or internal relative URLs
+    if (subUrl.startsWith('/api/translate-sub') || subUrl.includes('/api/translate-sub')) {
+        try {
+            const parsed = new URL(subUrl, 'http://127.0.0.1');
+            const realSourceUrl = parsed.searchParams.get('url');
+            const imdbId = parsed.searchParams.get('imdbId') || 'unknown';
+            if (!realSourceUrl) {
+                return res.status(400).send('Missing source URL for AI translation');
+            }
+            const response = await axios.get(realSourceUrl, {
+                responseType: 'arraybuffer',
+                timeout: 10000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                }
+            });
+            let rawSource = EncodingService.convertToUtf8(Buffer.from(response.data));
+            if (realSourceUrl.endsWith('.vtt') || rawSource.startsWith('WEBVTT')) {
+                rawSource = EncodingService.vttToSrt(rawSource);
+            }
+            const cacheKey = `${imdbId}_${realSourceUrl}`;
+            const hebrewSrt = await TranslationService.translateSrt(rawSource, cacheKey);
+            res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(targetFilename)}"; filename*=UTF-8''${encodeURIComponent(targetFilename)}`);
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            return res.send(Buffer.from(hebrewSrt, 'utf-8'));
+        }
+        catch (err) {
+            console.error('[DownloadRouter] Error in AI subtitle translation proxy:', err?.message);
+            return res.status(500).send('Error translating subtitle');
+        }
     }
     try {
         const response = await axios.get(subUrl, {
@@ -88,6 +121,46 @@ downloadRouter.get('/api/download-sub', async (req, res) => {
     catch (error) {
         console.error(`[DownloadRouter] Failed to proxy subtitle: ${subUrl}`, error?.message);
         res.status(500).send('Error downloading and processing subtitle');
+    }
+});
+// Automated AI Hebrew Translation Endpoint for Subtitles
+downloadRouter.get('/api/translate-sub', async (req, res) => {
+    const sourceUrl = req.query.url;
+    const imdbId = req.query.imdbId || 'unknown';
+    const release = req.query.release || 'release';
+    let targetFilename = req.query.filename || `${release}.srt`;
+    if (!sourceUrl) {
+        return res.status(400).send('Missing source subtitle URL');
+    }
+    targetFilename = targetFilename.replace(/[<>:"/\\|?*]/g, '_').trim();
+    if (targetFilename.endsWith('.mkv') || targetFilename.endsWith('.mp4') || targetFilename.endsWith('.avi')) {
+        targetFilename = targetFilename.substring(0, targetFilename.lastIndexOf('.'));
+    }
+    if (!targetFilename.endsWith('.srt')) {
+        targetFilename += '.srt';
+    }
+    try {
+        const response = await axios.get(sourceUrl, {
+            responseType: 'arraybuffer',
+            timeout: 10000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+            }
+        });
+        let rawSource = EncodingService.convertToUtf8(Buffer.from(response.data));
+        if (sourceUrl.endsWith('.vtt') || rawSource.startsWith('WEBVTT')) {
+            rawSource = EncodingService.vttToSrt(rawSource);
+        }
+        const cacheKey = `${imdbId}_${sourceUrl}`;
+        const hebrewSrt = await TranslationService.translateSrt(rawSource, cacheKey);
+        res.setHeader('Content-Type', 'application/x-subrip; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(targetFilename)}"; filename*=UTF-8''${encodeURIComponent(targetFilename)}`);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.send(Buffer.from(hebrewSrt, 'utf-8'));
+    }
+    catch (error) {
+        console.error(`[DownloadRouter] Failed to translate subtitle from ${sourceUrl}:`, error?.message);
+        res.status(500).send('Error translating subtitle');
     }
 });
 // Direct HTTP Torrent Streaming & Download Bridge (Zero P2P blockades for mobile carriers)

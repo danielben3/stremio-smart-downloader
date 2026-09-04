@@ -48,6 +48,26 @@ export class SubtitleService {
       matchScore: targetTorrentName ? this.calculateMatchScore(sub.release, targetTorrentName) : 50
     }));
 
+    // Check if high-quality matched Hebrew subtitles are available
+    const hasHighQualityHebrew = scoredSubs.some(s => s.lang === 'heb' && (s.matchScore || 0) >= 50 && s.source !== 'ai_translated');
+    if (!hasHighQualityHebrew) {
+      const topEng = scoredSubs.find(s => s.lang === 'eng');
+      if (topEng) {
+        scoredSubs.unshift({
+          id: `ai-heb-${imdbId}`,
+          lang: 'heb',
+          langName: 'עברית (תרגום AI מסונכרן)',
+          release: `${topEng.release} (AI Hebrew)`,
+          downloadUrl: `/api/translate-sub?url=${encodeURIComponent(topEng.downloadUrl)}&imdbId=${imdbId}&release=${encodeURIComponent(topEng.release)}`,
+          format: 'srt',
+          source: 'ai_translated',
+          rating: 5.0,
+          uploader: 'AI Auto-Translator',
+          matchScore: 95
+        });
+      }
+    }
+
     // Sort: Hebrew first, then highest match score, then rating
     scoredSubs.sort((a, b) => {
       // Hebrew always prioritized

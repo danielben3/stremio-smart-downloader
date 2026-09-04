@@ -39,7 +39,7 @@ export interface SubtitleItem {
   release: string; // e.g. 'PSA', 'YIFY', 'AMZN'
   downloadUrl: string;
   format: 'srt' | 'vtt';
-  source: 'wizdom' | 'subdl' | 'opensubtitles' | 'stremio';
+  source: 'wizdom' | 'subdl' | 'opensubtitles' | 'stremio' | 'ai_translated';
   rating?: number;
   uploader?: string;
   matchScore?: number; // 0 to 100 based on release name matching

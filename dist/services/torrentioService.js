@@ -54,9 +54,9 @@ export class TorrentioService {
                 streams.push(parsed);
             }
         }
-        // Sort by Quality (4K -> 1080p -> 720p) and then by Seeds
+        // Sort for Mobile & Performance: 1080p (ideal for devices), then 720p, then 4K, prioritized by seeders
         streams.sort((a, b) => {
-            const qualityRank = { '4K': 4, '2160p': 4, '1080p': 3, '720p': 2, '480p': 1 };
+            const qualityRank = { '1080p': 4, '720p': 3, '4K': 2, '2160p': 2, '480p': 1 };
             const qA = qualityRank[a.quality] || 0;
             const qB = qualityRank[b.quality] || 0;
             if (qB !== qA)
