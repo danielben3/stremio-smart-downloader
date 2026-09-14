@@ -187,6 +187,45 @@
         </div>
       </div>
 
+      <!-- Section 3: Hardsub Burn-in (Telegram & Smart TVs) -->
+      <div class="hardsub-box" style="margin-top: 1.5rem; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: var(--radius-lg); padding: 1.25rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.4rem;">🔥</span>
+            <div>
+              <strong style="color: #fff; font-size: 1.05rem;">אפשרות 1: צריבת כתוביות (Hardsub)</strong>
+              <div style="font-size: 0.8rem; color: var(--text-secondary);">עברית מוטבעת בפיקסלים – מותאם 100% לטלגרם, טלוויזיות חכמות וכל נגן</div>
+            </div>
+          </div>
+          <span class="badge" style="background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.4);">מומלץ לטלגרם ⭐</span>
+        </div>
+
+        <button id="startHardsubBtn" class="btn btn-primary" style="background: linear-gradient(135deg, #ef4444, #b91c1c); width: 100%; font-size: 1rem; padding: 0.85rem; display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
+          <span>🔥 צרוב כתוביות לתוך הוידאו (Hardsub)</span>
+        </button>
+
+        <!-- Hardsub Progress Container (hidden by default) -->
+        <div id="hardsubProgressContainer" style="display: none; margin-top: 1rem; background: rgba(0,0,0,0.3); border-radius: var(--radius-md); padding: 1rem; border: 1px solid rgba(255,255,255,0.1);">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.85rem;">
+            <span id="hardsubStatusText" style="color: #60a5fa; font-weight: 600;">מפעיל מנוע צריבה...</span>
+            <span id="hardsubPercentText" style="color: #fff; font-weight: 700;">0%</span>
+          </div>
+          <div style="background: rgba(255,255,255,0.1); border-radius: 999px; height: 10px; overflow: hidden;">
+            <div id="hardsubProgressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #ef4444, #f59e0b); transition: width 0.3s ease;"></div>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-top: 0.5rem; font-size: 0.78rem; color: var(--text-secondary);">
+            <span id="hardsubSpeedText">מהירות: --</span>
+            <span id="hardsubFpsText">FPS: --</span>
+            <span id="hardsubEtaText">נותר: --</span>
+          </div>
+          <div id="hardsubDoneActions" style="display: none; margin-top: 0.75rem; text-align: center;">
+            <a id="hardsubDownloadLink" href="#" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #059669); text-decoration: none; display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; font-weight: 700;">
+              📥 הורד קובץ וידאו מוטבע (Hardsub MP4)
+            </a>
+          </div>
+        </div>
+      </div>
+
       <!-- Android Tips -->
       <div class="tip-box">
         💡 <strong>טיפ לאנדרואיד:</strong> קובץ הכתוביות יירד עם <u>שם זהה לחלוטין</u> לשם הטורנט אל תיקיית <code>Downloads</code> בטלפון. נגנים כמו <strong>VLC</strong>, <strong>Nova Player</strong> ו-<strong>MX Player</strong> יזהו ויציגו את התרגום אוטומטית בעת פתיחת הסרט!

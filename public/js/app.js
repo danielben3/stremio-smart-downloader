@@ -499,6 +499,98 @@ function setupActions() {
       }, 700);
     };
   }
+
+  // 5. Start Hardsub Burn-in Job
+  const startHardsubBtn = document.getElementById('startHardsubBtn');
+  if (startHardsubBtn) {
+    startHardsubBtn.onclick = async () => {
+      const currentTorrent = currentData.torrents[selectedTorrentIndex];
+      const videoFilename = currentTorrent ? currentTorrent.filename : null;
+      let srtFilename = videoFilename ? videoFilename.replace(/\.[^/.]+$/, '') + '.srt' : null;
+
+      const progressContainer = document.getElementById('hardsubProgressContainer');
+      const statusText = document.getElementById('hardsubStatusText');
+      const percentText = document.getElementById('hardsubPercentText');
+      const progressBar = document.getElementById('hardsubProgressBar');
+      const speedText = document.getElementById('hardsubSpeedText');
+      const fpsText = document.getElementById('hardsubFpsText');
+      const etaText = document.getElementById('hardsubEtaText');
+      const doneActions = document.getElementById('hardsubDoneActions');
+      const downloadLink = document.getElementById('hardsubDownloadLink');
+
+      progressContainer.style.display = 'block';
+      startHardsubBtn.disabled = true;
+      startHardsubBtn.style.opacity = '0.6';
+      doneActions.style.display = 'none';
+      statusText.innerText = 'מאתר קבצים ומפעיל מנוע צריבה...';
+      statusText.style.color = '#60a5fa';
+
+      try {
+        const res = await fetch('/api/hardsub/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ videoFilename, srtFilename })
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'שגיאה בהפעלת הצריבה');
+        }
+
+        const jobId = data.job.id;
+        showToast('🔥 תהליך הצריבה החל בהצלחה!');
+
+        // Poll for progress every 1.5 seconds
+        const interval = setInterval(async () => {
+          try {
+            const statusRes = await fetch(`/api/hardsub/status/${jobId}`);
+            if (!statusRes.ok) return;
+
+            const { job } = await statusRes.json();
+            if (!job) return;
+
+            if (job.status === 'processing') {
+              statusText.innerText = `צורב כתוביות ב-1080p (RTL)...`;
+              percentText.innerText = `${job.percent}%`;
+              progressBar.style.width = `${job.percent}%`;
+              speedText.innerText = `מהירות: ${job.speed || '--'}`;
+              fpsText.innerText = `FPS: ${job.fps || '--'}`;
+              etaText.innerText = `נותר: ${job.eta || '--'}`;
+            } else if (job.status === 'completed') {
+              clearInterval(interval);
+              statusText.innerText = '✅ הצריבה הושלמה ב-100%! הקובץ מוכן.';
+              statusText.style.color = '#34d399';
+              percentText.innerText = '100%';
+              progressBar.style.width = '100%';
+              progressBar.style.background = 'linear-gradient(90deg, #10b981, #059669)';
+              etaText.innerText = 'הסתיים';
+              doneActions.style.display = 'block';
+              downloadLink.href = `/api/hardsub/file/${jobId}`;
+              startHardsubBtn.disabled = false;
+              startHardsubBtn.style.opacity = '1';
+              showToast('🎉 סרט ה-Hardsub מוכן להורדה ולשיתוף בטלגרם!');
+            } else if (job.status === 'failed') {
+              clearInterval(interval);
+              statusText.innerText = `❌ נכשל: ${job.error || 'שגיאה בקידוד'}`;
+              statusText.style.color = '#ef4444';
+              startHardsubBtn.disabled = false;
+              startHardsubBtn.style.opacity = '1';
+              showToast('שגיאה בצריבת הוידאו');
+            }
+          } catch (pollErr) {
+            console.warn('Poll error:', pollErr);
+          }
+        }, 1500);
+
+      } catch (err) {
+        statusText.innerText = `⚠️ שגיאה: ${err.message}`;
+        statusText.style.color = '#ef4444';
+        startHardsubBtn.disabled = false;
+        startHardsubBtn.style.opacity = '1';
+        showToast(err.message);
+      }
+    };
+  }
 }
 
 function downloadSelectedSubtitle(targetVideoFilename) {

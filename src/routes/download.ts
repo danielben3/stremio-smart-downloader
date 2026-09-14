@@ -1,10 +1,13 @@
 import { Router, Request, Response } from 'express';
+import fs from 'fs';
+import path from 'path';
 import axios from 'axios';
 import QRCode from 'qrcode';
 import { MetadataService } from '../services/metadataService.js';
 import { TorrentioService } from '../services/torrentioService.js';
 import { SubtitleService } from '../services/subtitles/subtitleService.js';
 import { EncodingService } from '../services/encodingService.js';
+import { HardsubService } from '../services/hardsubService.js';
 import { ContentType, DownloadDetailsResponse } from '../types/index.js';
 import torrentStream from 'torrent-stream';
 
@@ -327,3 +330,119 @@ downloadRouter.get('/api/qr', async (req: Request, res: Response) => {
     res.status(500).send('QR Generation failed');
   }
 });
+
+// Hardsub: List downloadable/local files in downloads directory
+downloadRouter.get('/api/hardsub/files', (_req: Request, res: Response) => {
+  try {
+    const downloadsDir = path.resolve('downloads');
+    if (!fs.existsSync(downloadsDir)) {
+      return res.json({ files: [] });
+    }
+
+    const allFiles = fs.readdirSync(downloadsDir);
+    const videoFiles = allFiles.filter(f =>
+      (f.endsWith('.mkv') || f.endsWith('.mp4') || f.endsWith('.avi')) && !f.includes('.Hardsub.')
+    );
+
+    const items = videoFiles.map(video => {
+      const ext = path.extname(video);
+      const base = path.basename(video, ext);
+      const expectedSrt = `${base}.srt`;
+      const hardsubFile = `${base}.Hardsub.mp4`;
+
+      const hasSrt = allFiles.includes(expectedSrt);
+      const hasHardsub = allFiles.includes(hardsubFile);
+
+      const videoStat = fs.statSync(path.join(downloadsDir, video));
+      const hardsubStat = hasHardsub ? fs.statSync(path.join(downloadsDir, hardsubFile)) : null;
+
+      return {
+        videoFilename: video,
+        srtFilename: hasSrt ? expectedSrt : null,
+        hardsubFilename: hasHardsub ? hardsubFile : null,
+        videoSizeMb: (videoStat.size / (1024 * 1024)).toFixed(1),
+        hardsubSizeMb: hardsubStat ? (hardsubStat.size / (1024 * 1024)).toFixed(1) : null,
+        canBurn: hasSrt
+      };
+    });
+
+    res.json({ files: items });
+  } catch (err: any) {
+    console.error('[DownloadRouter] Error listing hardsub files:', err);
+    res.status(500).json({ error: 'Failed to list files' });
+  }
+});
+
+// Hardsub: Start burn-in job
+downloadRouter.post('/api/hardsub/start', async (req: Request, res: Response) => {
+  try {
+    const { videoFilename, srtFilename, videoPath, srtPath } = req.body;
+    const downloadsDir = path.resolve('downloads');
+
+    const resolvedVideoPath = videoPath || (videoFilename ? path.join(downloadsDir, videoFilename) : null);
+    let resolvedSrtPath = srtPath || (srtFilename ? path.join(downloadsDir, srtFilename) : null);
+
+    if (!resolvedVideoPath || !fs.existsSync(resolvedVideoPath)) {
+      return res.status(400).json({ error: 'קובץ הוידאו לא נמצא בדיסק' });
+    }
+
+    // Auto-detect matching SRT if not explicitly provided
+    if (!resolvedSrtPath || !fs.existsSync(resolvedSrtPath)) {
+      const ext = path.extname(resolvedVideoPath);
+      const baseName = path.basename(resolvedVideoPath, ext);
+      const autoSrt = path.join(downloadsDir, `${baseName}.srt`);
+      if (fs.existsSync(autoSrt)) {
+        resolvedSrtPath = autoSrt;
+      } else {
+        return res.status(400).json({ error: 'קובץ כתוביות בעברית (.srt) לא נמצא עבור וידאו זה' });
+      }
+    }
+
+    const job = HardsubService.startBurnJob({
+      inputVideoPath: resolvedVideoPath,
+      inputSrtPath: resolvedSrtPath
+    });
+
+    res.json({ success: true, job });
+  } catch (err: any) {
+    console.error('[DownloadRouter] Failed to start hardsub job:', err);
+    res.status(500).json({ error: err.message || 'Failed to start burning job' });
+  }
+});
+
+// Hardsub: Query job status
+downloadRouter.get('/api/hardsub/status/:jobId', (req: Request, res: Response) => {
+  const jobId = String(req.params.jobId);
+  const job = HardsubService.getJob(jobId);
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+  res.json({ job });
+});
+
+// Hardsub: Download completed MP4 file
+downloadRouter.get('/api/hardsub/file/:jobId', (req: Request, res: Response) => {
+  const jobId = String(req.params.jobId);
+  const job = HardsubService.getJob(jobId);
+  if (!job) {
+    return res.status(404).send('Job not found');
+  }
+  if (job.status !== 'completed' || !fs.existsSync(job.outputVideo)) {
+    return res.status(400).send('הקובץ עדיין אינו מוכן או שנכשל');
+  }
+
+  const filename = path.basename(job.outputVideo);
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  res.setHeader('Content-Type', 'video/mp4');
+
+  const fileStream = fs.createReadStream(job.outputVideo);
+  fileStream.pipe(res);
+});
+
+// Hardsub: Cancel job
+downloadRouter.post('/api/hardsub/cancel/:jobId', (req: Request, res: Response) => {
+  const jobId = String(req.params.jobId);
+  const success = HardsubService.cancelJob(jobId);
+  res.json({ success });
+});
+

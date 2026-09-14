@@ -39,7 +39,12 @@ stremioRouter.get('/stream/:type/:id.json', async (req, res) => {
         }
         const streams = [
             {
-                name: `⚡ הורדה חכמה\n(כתוביות בעברית)`,
+                name: `🔥 צריבת כתוביות (Hardsub)\n[טלגרם ומובייל]`,
+                title: `🔥 ${titleLabel} - וידאו עם עברית מוטבעת (Hardsub)\n🎬 מותאם במיוחד להעלאה לטלגרם, טלוויזיות חכמות וצפייה ישירה ללא נגנים חיצוניים`,
+                externalUrl: `${downloadUrl}?tab=hardsub`
+            },
+            {
+                name: `⚡ הורדה חכמה\n(וידאו + SRT ל-1DM)`,
                 title: `${titleLabel}\n📱 לחיצה פותחת את מנהל ההורדות המהיר (הורדת וידאו + כתוביות .SRT מסונכרנות ל-1DM)`,
                 externalUrl: downloadUrl
             }
